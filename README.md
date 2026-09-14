@@ -1,5 +1,34 @@
 [![progress-banner](https://backend.codecrafters.io/progress/http-server/90e18e80-b78f-40de-873e-cc6f7ba667f6)](https://app.codecrafters.io/users/Saitejar0203?r=2qF)
 
+# HTTP Server in Python
+
+A from-scratch HTTP/1.1 server learning project in Python, following the
+[CodeCrafters challenge](https://app.codecrafters.io/courses/http-server/overview).
+The repository is currently at the starter stage; request handling has not yet
+been implemented. The first exercise is **Bind to a port**.
+
+## Local setup
+
+Requires Python 3.14 or later and `uv`.
+
+```sh
+uv sync --locked
+./your_program.sh
+```
+
+The starter currently prints a debug message and exits. As we implement the
+stages, the same launcher will start the server.
+
+## How we work
+
+Discuss the mechanism, review a design, implement the requested exercise, test,
+commit, submit with `codecrafters submit`, and push to GitHub. Each completed
+exercise gets its own commit. See [AGENTS.md](AGENTS.md) for the learning workflow.
+
+The `origin` remote connects to CodeCrafters; `github` publishes this project.
+
+## Original challenge instructions
+
 This is a starting point for Python solutions to the
 ["Build Your Own HTTP server" Challenge](https://app.codecrafters.io/courses/http-server/overview).
 
