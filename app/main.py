@@ -103,6 +103,14 @@ def handle_client(conn, directory=None):
             conn.sendall(response)
 
 
+def serve_connection(conn, directory):
+    # A disconnected client must not affect another connection worker.
+    try:
+        handle_client(conn, directory)
+    except (ConnectionError, TimeoutError):
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory")
@@ -111,7 +119,7 @@ def main():
     with socket.create_server(("localhost", 4221), reuse_port=True) as server_socket:
         while True:
             conn, address = server_socket.accept() # wait for client
-            threading.Thread(target=handle_client, args=(conn, args.directory), daemon=True).start()
+            threading.Thread(target=serve_connection, args=(conn, args.directory), daemon=True).start()
 
 
 if __name__ == "__main__":
