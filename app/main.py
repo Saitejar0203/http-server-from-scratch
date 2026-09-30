@@ -1,8 +1,11 @@
+import argparse
+import os
+from pathlib import Path
 import socket
 import threading
 
 
-def handle_client(conn):
+def handle_client(conn, directory=None):
     with conn:
         request = b""
         # TCP reads may return only part of the request.
@@ -34,6 +37,23 @@ def handle_client(conn):
                 + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
                 + body
             )
+        elif method == b"GET" and path.startswith(b"/files/"):
+            try:
+                if directory is None:
+                    raise FileNotFoundError
+                root = Path(directory).resolve()
+                file_path = (root / os.fsdecode(path[len(b"/files/"):])).resolve()
+                if not file_path.is_relative_to(root) or not file_path.is_file():
+                    raise FileNotFoundError
+                body = file_path.read_bytes()
+                response = (
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: application/octet-stream\r\n"
+                    + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+                    + body
+                )
+            except (OSError, ValueError):
+                response = b"HTTP/1.1 404 Not Found\r\n\r\n"
         else:
             response = b"HTTP/1.1 404 Not Found\r\n\r\n"
 
@@ -41,11 +61,14 @@ def handle_client(conn):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--directory")
+    args = parser.parse_args()
     print("Logs from your program will appear here!")
     with socket.create_server(("localhost", 4221), reuse_port=True) as server_socket:
         while True:
             conn, address = server_socket.accept() # wait for client
-            threading.Thread(target=handle_client, args=(conn,), daemon=True).start()
+            threading.Thread(target=handle_client, args=(conn, args.directory), daemon=True).start()
 
 
 if __name__ == "__main__":
