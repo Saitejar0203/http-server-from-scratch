@@ -23,6 +23,7 @@ static int send_all(int fd, const void *data, size_t length) {
 }
 
 #define HEADER_LIMIT (64 * 1024)
+#define BODY_LIMIT (64 * 1024 * 1024)
 
 typedef struct {
     unsigned char *data;
@@ -31,7 +32,7 @@ typedef struct {
 } Buffer;
 
 static int receive_more(int fd, Buffer *buffer) {
-    if (buffer->length >= HEADER_LIMIT) return -1;
+    if (buffer->length >= BODY_LIMIT + HEADER_LIMIT) return -1;
     if (buffer->capacity - buffer->length < 4096 + 1) {
         size_t capacity = buffer->capacity + 4096 + 1;
         void *grown = realloc(buffer->data, capacity);
@@ -50,7 +51,8 @@ static int receive_more(int fd, Buffer *buffer) {
 static int respond(int fd, int status, const char *type,
                    const unsigned char *body, size_t length) {
     char header[512];
-    const char *reason = status == 200 ? "OK" : "Not Found";
+    const char *reason = status == 200 ? "OK" : status == 201 ? "Created" :
+                         status == 400 ? "Bad Request" : "Not Found";
     int n = snprintf(header, sizeof(header),
         "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n\r\n",
         status, reason, type, length);
@@ -114,23 +116,66 @@ missing:
     respond(fd, 404, "text/plain", NULL, 0);
 }
 
+static void save_file(int fd, const char *name, const unsigned char *body, size_t length) {
+    int file = -1;
+    if (files_directory < 0 || !valid_filename(name)) goto failure;
+    file = openat(files_directory, name, O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK, 0666);
+    struct stat st;
+    if (file < 0 || fstat(file, &st) < 0 || !S_ISREG(st.st_mode) || ftruncate(file, 0) < 0)
+        goto failure;
+    size_t written = 0;
+    while (written < length) {
+        ssize_t n = write(file, body + written, length - written);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) goto failure;
+        written += (size_t)n;
+    }
+    if (close(file) < 0) { file = -1; goto failure; }
+    respond(fd, 201, "text/plain", NULL, 0);
+    return;
+failure:
+    if (file >= 0) close(file);
+    respond(fd, 404, "text/plain", NULL, 0);
+}
+
 static void handle_client(int fd) {
     Buffer buffer = {0};
+    char *head = NULL;
     while (!buffer.data || !strstr((char *)buffer.data, "\r\n\r\n")) {
-        if (receive_more(fd, &buffer) < 0) { free(buffer.data); return; }
+        if (buffer.length >= HEADER_LIMIT || receive_more(fd, &buffer) < 0) goto done;
     }
-    char *line_end = strstr((char *)buffer.data, "\r\n");
+    size_t header_length = (size_t)(strstr((char *)buffer.data, "\r\n\r\n") - (char *)buffer.data) + 4;
+    head = malloc(header_length + 1);
+    if (!head) goto done;
+    memcpy(head, buffer.data, header_length); head[header_length] = 0;
+    char *line_end = strstr(head, "\r\n");
     const char *headers = line_end + 2;
     *line_end = 0;
     char *save = NULL;
-    char *method = strtok_r((char *)buffer.data, " ", &save);
+    char *method = strtok_r(head, " ", &save);
     char *path = strtok_r(NULL, " ", &save);
+    char *length_text = header_value(headers, "Content-Length");
+    if (!length_text) goto done;
+    size_t body_length = 0;
+    for (char *digit = length_text; *digit; digit++) {
+        if (*digit < '0' || *digit > '9' || body_length > BODY_LIMIT / 10) {
+            free(length_text); respond(fd, 400, "text/plain", NULL, 0); goto done;
+        }
+        body_length = body_length * 10 + (size_t)(*digit - '0');
+    }
+    free(length_text);
+    if (body_length > BODY_LIMIT) { respond(fd, 400, "text/plain", NULL, 0); goto done; }
+    while (buffer.length < header_length + body_length) {
+        if (receive_more(fd, &buffer) < 0) goto done;
+    }
     if (method && path) {
         if (strcmp(path, "/") == 0) {
             respond(fd, 200, "text/plain", NULL, 0);
         } else if (strncmp(path, "/echo/", 6) == 0) {
             const unsigned char *body = (unsigned char *)path + 6;
             respond(fd, 200, "text/plain", body, strlen((char *)body));
+        } else if (strcmp(method, "POST") == 0 && strncmp(path, "/files/", 7) == 0) {
+            save_file(fd, path + 7, buffer.data + header_length, body_length);
         } else if (strcmp(method, "GET") == 0 && strncmp(path, "/files/", 7) == 0) {
             return_file(fd, path + 7);
         } else if (strcmp(path, "/user-agent") == 0) {
@@ -141,6 +186,8 @@ static void handle_client(int fd) {
             respond(fd, 404, "text/plain", NULL, 0);
         }
     }
+done:
+    free(head);
     free(buffer.data);
 }
 
