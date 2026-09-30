@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -55,12 +56,35 @@ static int respond(int fd, int status, const char *type,
     return send_all(fd, body, length);
 }
 
+/* The caller owns the returned header value. Header names are case-insensitive. */
+static char *header_value(const char *headers, const char *name) {
+    size_t name_length = strlen(name);
+    while (*headers && strncmp(headers, "\r\n", 2) != 0) {
+        const char *end = strstr(headers, "\r\n");
+        if (!end) break;
+        const char *colon = memchr(headers, ':', (size_t)(end - headers));
+        if (colon && (size_t)(colon - headers) == name_length &&
+            strncasecmp(headers, name, name_length) == 0) {
+            const char *value = colon + 1;
+            while (value < end && (*value == ' ' || *value == '\t')) value++;
+            while (end > value && (end[-1] == ' ' || end[-1] == '\t')) end--;
+            size_t length = (size_t)(end - value);
+            char *copy = malloc(length + 1);
+            if (copy) { memcpy(copy, value, length); copy[length] = 0; }
+            return copy;
+        }
+        headers = end + 2;
+    }
+    return strdup("");
+}
+
 static void handle_client(int fd) {
     Buffer buffer = {0};
     while (!buffer.data || !strstr((char *)buffer.data, "\r\n\r\n")) {
         if (receive_more(fd, &buffer) < 0) { free(buffer.data); return; }
     }
     char *line_end = strstr((char *)buffer.data, "\r\n");
+    const char *headers = line_end + 2;
     *line_end = 0;
     char *save = NULL;
     char *method = strtok_r((char *)buffer.data, " ", &save);
@@ -71,6 +95,10 @@ static void handle_client(int fd) {
         } else if (strncmp(path, "/echo/", 6) == 0) {
             const unsigned char *body = (unsigned char *)path + 6;
             respond(fd, 200, "text/plain", body, strlen((char *)body));
+        } else if (strcmp(path, "/user-agent") == 0) {
+            char *agent = header_value(headers, "User-Agent");
+            if (agent) respond(fd, 200, "text/plain", (unsigned char *)agent, strlen(agent));
+            free(agent);
         } else {
             respond(fd, 404, "text/plain", NULL, 0);
         }
