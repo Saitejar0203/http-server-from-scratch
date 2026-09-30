@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -106,6 +107,14 @@ static void handle_client(int fd) {
     free(buffer.data);
 }
 
+static void *worker(void *argument) {
+    int fd = *(int *)argument;
+    free(argument);
+    handle_client(fd);
+    close(fd);
+    return NULL;
+}
+
 int main(void) {
     signal(SIGPIPE, SIG_IGN);
     int listener = socket(AF_INET, SOCK_STREAM, 0);
@@ -123,8 +132,14 @@ int main(void) {
     for (;;) {
         int client = accept(listener, NULL, NULL);
         if (client < 0) { if (errno == EINTR) continue; perror("accept"); break; }
-        handle_client(client);
-        close(client);
+        int *owned_fd = malloc(sizeof(*owned_fd));
+        if (!owned_fd) { close(client); continue; }
+        *owned_fd = client;
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, worker, owned_fd) != 0) {
+            free(owned_fd); close(client); continue;
+        }
+        pthread_detach(thread);
     }
     close(listener);
     return 1;
