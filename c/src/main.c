@@ -1,4 +1,6 @@
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <pthread.h>
@@ -79,6 +81,39 @@ static char *header_value(const char *headers, const char *name) {
     return strdup("");
 }
 
+static int files_directory = -1;
+
+static int valid_filename(const char *name) {
+    return *name && !strchr(name, '/') && strcmp(name, ".") && strcmp(name, "..");
+}
+
+static void return_file(int fd, const char *name) {
+    int file = -1;
+    unsigned char *body = NULL;
+    struct stat st;
+    if (files_directory < 0 || !valid_filename(name)) goto missing;
+    file = openat(files_directory, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+    if (file < 0 || fstat(file, &st) < 0 || !S_ISREG(st.st_mode) ||
+        st.st_size < 0 || st.st_size > 64 * 1024 * 1024) goto missing;
+    size_t size = (size_t)st.st_size;
+    body = malloc(size ? size : 1);
+    if (!body) goto missing;
+    size_t used = 0;
+    while (used < size) {
+        ssize_t n = read(file, body + used, size - used);
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0) goto missing;
+        if (!n) break;
+        used += (size_t)n;
+    }
+    respond(fd, 200, "application/octet-stream", body, used);
+    free(body); close(file); return;
+missing:
+    free(body);
+    if (file >= 0) close(file);
+    respond(fd, 404, "text/plain", NULL, 0);
+}
+
 static void handle_client(int fd) {
     Buffer buffer = {0};
     while (!buffer.data || !strstr((char *)buffer.data, "\r\n\r\n")) {
@@ -96,6 +131,8 @@ static void handle_client(int fd) {
         } else if (strncmp(path, "/echo/", 6) == 0) {
             const unsigned char *body = (unsigned char *)path + 6;
             respond(fd, 200, "text/plain", body, strlen((char *)body));
+        } else if (strcmp(method, "GET") == 0 && strncmp(path, "/files/", 7) == 0) {
+            return_file(fd, path + 7);
         } else if (strcmp(path, "/user-agent") == 0) {
             char *agent = header_value(headers, "User-Agent");
             if (agent) respond(fd, 200, "text/plain", (unsigned char *)agent, strlen(agent));
@@ -115,7 +152,13 @@ static void *worker(void *argument) {
     return NULL;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--directory") == 0 && i + 1 < argc) {
+            files_directory = open(argv[++i], O_RDONLY | O_DIRECTORY);
+            if (files_directory < 0) { perror("directory"); return 1; }
+        } else { fprintf(stderr, "Usage: %s [--directory PATH]\n", argv[0]); return 1; }
+    }
     signal(SIGPIPE, SIG_IGN);
     int listener = socket(AF_INET, SOCK_STREAM, 0);
     if (listener < 0) { perror("socket"); return 1; }
