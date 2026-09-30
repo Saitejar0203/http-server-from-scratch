@@ -12,12 +12,15 @@
 #include <unistd.h>
 #include <zlib.h>
 
+/* Each detached worker owns one connection; this flag is never shared. */
+static _Thread_local int close_connection;
+
 static int send_all(int fd, const void *data, size_t length) {
     const unsigned char *p = data;
     while (length) {
         ssize_t n = send(fd, p, length, 0);
         if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) return -1;
+        if (n <= 0) { close_connection = 1; return -1; }
         p += n; length -= (size_t)n;
     }
     return 0;
@@ -55,8 +58,9 @@ static int respond_encoded(int fd, int status, const char *type,
     const char *reason = status == 200 ? "OK" : status == 201 ? "Created" :
                          status == 400 ? "Bad Request" : "Not Found";
     int n = snprintf(header, sizeof(header),
-        "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n%sContent-Length: %zu\r\n\r\n",
-        status, reason, type, encoding, length);
+        "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n%sContent-Length: %zu\r\n%s\r\n",
+        status, reason, type, encoding, length,
+        close_connection ? "Connection: close\r\n" : "");
     if (n < 0 || (size_t)n >= sizeof(header)) return -1;
     if (send_all(fd, header, (size_t)n) < 0) return -1;
     return send_all(fd, body, length);
@@ -207,6 +211,10 @@ static void handle_client(int fd) {
     char *save = NULL;
     char *method = strtok_r(head, " ", &save);
     char *path = strtok_r(NULL, " ", &save);
+    char *connection = header_value(headers, "Connection");
+    if (!connection) goto done;
+    close_connection = has_token(connection, "close");
+    free(connection);
     char *length_text = header_value(headers, "Content-Length");
     if (!length_text) goto done;
     size_t body_length = 0;
@@ -239,6 +247,7 @@ static void handle_client(int fd) {
             respond(fd, 404, "text/plain", NULL, 0);
         }
     }
+    if (close_connection) goto done;
     /* Preserve bytes already received for the next request on this socket. */
     size_t consumed = header_length + body_length;
     memmove(buffer.data, buffer.data + consumed, buffer.length - consumed);
