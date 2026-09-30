@@ -48,17 +48,22 @@ static int receive_more(int fd, Buffer *buffer) {
     return 0;
 }
 
-static int respond(int fd, int status, const char *type,
-                   const unsigned char *body, size_t length) {
+static int respond_encoded(int fd, int status, const char *type,
+                   const unsigned char *body, size_t length, const char *encoding) {
     char header[512];
     const char *reason = status == 200 ? "OK" : status == 201 ? "Created" :
                          status == 400 ? "Bad Request" : "Not Found";
     int n = snprintf(header, sizeof(header),
-        "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n\r\n",
-        status, reason, type, length);
+        "HTTP/1.1 %d %s\r\nContent-Type: %s\r\n%sContent-Length: %zu\r\n\r\n",
+        status, reason, type, encoding, length);
     if (n < 0 || (size_t)n >= sizeof(header)) return -1;
     if (send_all(fd, header, (size_t)n) < 0) return -1;
     return send_all(fd, body, length);
+}
+
+static int respond(int fd, int status, const char *type,
+                   const unsigned char *body, size_t length) {
+    return respond_encoded(fd, status, type, body, length, "");
 }
 
 /* The caller owns the returned header value. Header names are case-insensitive. */
@@ -81,6 +86,15 @@ static char *header_value(const char *headers, const char *name) {
         headers = end + 2;
     }
     return strdup("");
+}
+
+static void return_echo(int fd, const char *headers, const unsigned char *body, size_t length) {
+    char *accepted = header_value(headers, "Accept-Encoding");
+    if (!accepted) return;
+    int gzip_accepted = strcasecmp(accepted, "gzip") == 0;
+    respond_encoded(fd, 200, "text/plain", body, length,
+                    gzip_accepted ? "Content-Encoding: gzip\r\n" : "");
+    free(accepted);
 }
 
 static int files_directory = -1;
@@ -173,7 +187,7 @@ static void handle_client(int fd) {
             respond(fd, 200, "text/plain", NULL, 0);
         } else if (strncmp(path, "/echo/", 6) == 0) {
             const unsigned char *body = (unsigned char *)path + 6;
-            respond(fd, 200, "text/plain", body, strlen((char *)body));
+            return_echo(fd, headers, body, strlen((char *)body));
         } else if (strcmp(method, "POST") == 0 && strncmp(path, "/files/", 7) == 0) {
             save_file(fd, path + 7, buffer.data + header_length, body_length);
         } else if (strcmp(method, "GET") == 0 && strncmp(path, "/files/", 7) == 0) {
