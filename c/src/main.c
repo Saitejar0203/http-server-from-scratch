@@ -192,10 +192,12 @@ failure:
 static void handle_client(int fd) {
     Buffer buffer = {0};
     char *head = NULL;
+    for (;;) {
     while (!buffer.data || !strstr((char *)buffer.data, "\r\n\r\n")) {
         if (buffer.length >= HEADER_LIMIT || receive_more(fd, &buffer) < 0) goto done;
     }
     size_t header_length = (size_t)(strstr((char *)buffer.data, "\r\n\r\n") - (char *)buffer.data) + 4;
+    if (header_length > HEADER_LIMIT) goto done;
     head = malloc(header_length + 1);
     if (!head) goto done;
     memcpy(head, buffer.data, header_length); head[header_length] = 0;
@@ -236,6 +238,13 @@ static void handle_client(int fd) {
         } else {
             respond(fd, 404, "text/plain", NULL, 0);
         }
+    }
+    /* Preserve bytes already received for the next request on this socket. */
+    size_t consumed = header_length + body_length;
+    memmove(buffer.data, buffer.data + consumed, buffer.length - consumed);
+    buffer.length -= consumed;
+    buffer.data[buffer.length] = 0;
+    free(head); head = NULL;
     }
 done:
     free(head);
