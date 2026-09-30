@@ -31,9 +31,13 @@ def handle_client(conn, directory=None):
         elif path.startswith(b"/echo/") or path == b"/user-agent":
             body = (headers.get(b"user-agent", b"") if path == b"/user-agent"
                     else path[len(b"/echo/"):])
+            encoding_header = b""
+            if path.startswith(b"/echo/") and headers.get(b"accept-encoding", b"").lower() == b"gzip":
+                encoding_header = b"Content-Encoding: gzip\r\n"
             response = (
                 b"HTTP/1.1 200 OK\r\n"
                 b"Content-Type: text/plain\r\n"
+                + encoding_header
                 + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
                 + body
             )
