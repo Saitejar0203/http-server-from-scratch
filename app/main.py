@@ -37,6 +37,34 @@ def handle_client(conn, directory=None):
                 + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
                 + body
             )
+        elif method == b"POST" and path.startswith(b"/files/"):
+            try:
+                length_value = headers.get(b"content-length", b"")
+                if not length_value.isdigit():
+                    raise ValueError("Invalid Content-Length")
+                length = int(length_value)
+            except ValueError:
+                conn.sendall(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+                return
+
+            body = request.split(b"\r\n\r\n", 1)[1][:length]
+            while len(body) < length:
+                chunk = conn.recv(min(4096, length - len(body)))
+                if not chunk:
+                    return  # Do not create a file from an incomplete upload.
+                body += chunk
+
+            try:
+                if directory is None:
+                    raise FileNotFoundError
+                root = Path(directory).resolve()
+                file_path = (root / os.fsdecode(path[len(b"/files/"):])).resolve()
+                if not file_path.is_relative_to(root) or file_path == root:
+                    raise FileNotFoundError
+                file_path.write_bytes(body)
+                response = b"HTTP/1.1 201 Created\r\n\r\n"
+            except (OSError, ValueError):
+                response = b"HTTP/1.1 404 Not Found\r\n\r\n"
         elif method == b"GET" and path.startswith(b"/files/"):
             try:
                 if directory is None:
