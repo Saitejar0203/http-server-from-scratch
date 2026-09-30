@@ -10,6 +10,7 @@
 #include <strings.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <zlib.h>
 
 static int send_all(int fd, const void *data, size_t length) {
     const unsigned char *p = data;
@@ -108,8 +109,28 @@ static void return_echo(int fd, const char *headers, const unsigned char *body, 
     char *accepted = header_value(headers, "Accept-Encoding");
     if (!accepted) return;
     int gzip_accepted = has_token(accepted, "gzip");
-    respond_encoded(fd, 200, "text/plain", body, length,
-                    gzip_accepted ? "Content-Encoding: gzip\r\n" : "");
+    if (gzip_accepted) {
+        z_stream stream = {0};
+        if (deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                         15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+            free(accepted); return;
+        }
+        size_t capacity = (size_t)deflateBound(&stream, (uLong)length);
+        unsigned char *compressed = malloc(capacity);
+        if (compressed) {
+            stream.next_in = (Bytef *)body;
+            stream.avail_in = (uInt)length;
+            stream.next_out = compressed;
+            stream.avail_out = (uInt)capacity;
+            if (deflate(&stream, Z_FINISH) == Z_STREAM_END)
+                respond_encoded(fd, 200, "text/plain", compressed,
+                                (size_t)stream.total_out, "Content-Encoding: gzip\r\n");
+            free(compressed);
+        }
+        deflateEnd(&stream);
+    } else {
+        respond(fd, 200, "text/plain", body, length);
+    }
     free(accepted);
 }
 

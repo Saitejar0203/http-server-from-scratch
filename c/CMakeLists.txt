@@ -11,3 +11,6 @@ add_executable(http-server ${SOURCE_FILES})
 find_package(Threads REQUIRED)
 target_link_libraries(http-server PRIVATE Threads::Threads)
 target_compile_options(http-server PRIVATE -Wall -Wextra -Wpedantic)
+
+find_package(ZLIB REQUIRED)
+target_link_libraries(http-server PRIVATE ZLIB::ZLIB)
