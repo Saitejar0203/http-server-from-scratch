@@ -23,10 +23,16 @@ def main():
                 request_line = request.split(b"\r\n", 1)[0]
                 method, path, version = request_line.split(b" ")
 
+                headers = {}
+                for line in request.split(b"\r\n\r\n", 1)[0].split(b"\r\n")[1:]:
+                    name, value = line.split(b":", 1)
+                    headers[name.lower()] = value.strip(b" \t")
+
                 if path == b"/":
                     response = b"HTTP/1.1 200 OK\r\n\r\n"
-                elif path.startswith(b"/echo/"):
-                    body = path[len(b"/echo/"):]
+                elif path.startswith(b"/echo/") or path == b"/user-agent":
+                    body = (headers.get(b"user-agent", b"") if path == b"/user-agent"
+                            else path[len(b"/echo/"):])
                     response = (
                         b"HTTP/1.1 200 OK\r\n"
                         b"Content-Type: text/plain\r\n"
