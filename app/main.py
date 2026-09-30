@@ -1,4 +1,5 @@
 import argparse
+import gzip
 import os
 from pathlib import Path
 import socket
@@ -37,6 +38,7 @@ def handle_client(conn, directory=None):
                 for value in headers.get(b"accept-encoding", b"").split(b",")
             ]
             if path.startswith(b"/echo/") and b"gzip" in accepted_encodings:
+                body = gzip.compress(body, mtime=0)
                 encoding_header = b"Content-Encoding: gzip\r\n"
             response = (
                 b"HTTP/1.1 200 OK\r\n"
