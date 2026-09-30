@@ -7,6 +7,24 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+static int send_all(int fd, const void *data, size_t length) {
+    const unsigned char *p = data;
+    while (length) {
+        ssize_t n = send(fd, p, length, 0);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return -1;
+        p += n; length -= (size_t)n;
+    }
+    return 0;
+}
+
+static void handle_client(int fd) {
+    char buffer[4096];
+    recv(fd, buffer, sizeof(buffer), 0);
+    const char response[] = "HTTP/1.1 200 OK\r\n\r\n";
+    send_all(fd, response, sizeof(response) - 1);
+}
+
 int main(void) {
     signal(SIGPIPE, SIG_IGN);
     int listener = socket(AF_INET, SOCK_STREAM, 0);
@@ -24,6 +42,7 @@ int main(void) {
     for (;;) {
         int client = accept(listener, NULL, NULL);
         if (client < 0) { if (errno == EINTR) continue; perror("accept"); break; }
+        handle_client(client);
         close(client);
     }
     close(listener);
