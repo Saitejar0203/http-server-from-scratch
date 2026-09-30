@@ -18,11 +18,48 @@ static int send_all(int fd, const void *data, size_t length) {
     return 0;
 }
 
+#define HEADER_LIMIT (64 * 1024)
+
+typedef struct {
+    unsigned char *data;
+    size_t length;
+    size_t capacity;
+} Buffer;
+
+static int receive_more(int fd, Buffer *buffer) {
+    if (buffer->length >= HEADER_LIMIT) return -1;
+    if (buffer->capacity - buffer->length < 4096 + 1) {
+        size_t capacity = buffer->capacity + 4096 + 1;
+        void *grown = realloc(buffer->data, capacity);
+        if (!grown) return -1;
+        buffer->data = grown; buffer->capacity = capacity;
+    }
+    ssize_t n;
+    do { n = recv(fd, buffer->data + buffer->length, 4096, 0); }
+    while (n < 0 && errno == EINTR);
+    if (n <= 0) return -1;
+    buffer->length += (size_t)n;
+    buffer->data[buffer->length] = 0;
+    return 0;
+}
+
 static void handle_client(int fd) {
-    char buffer[4096];
-    recv(fd, buffer, sizeof(buffer), 0);
-    const char response[] = "HTTP/1.1 200 OK\r\n\r\n";
-    send_all(fd, response, sizeof(response) - 1);
+    Buffer buffer = {0};
+    while (!buffer.data || !strstr((char *)buffer.data, "\r\n\r\n")) {
+        if (receive_more(fd, &buffer) < 0) { free(buffer.data); return; }
+    }
+    char *line_end = strstr((char *)buffer.data, "\r\n");
+    *line_end = 0;
+    char *save = NULL;
+    char *method = strtok_r((char *)buffer.data, " ", &save);
+    char *path = strtok_r(NULL, " ", &save);
+    if (method && path) {
+        const char *response = strcmp(path, "/") == 0
+            ? "HTTP/1.1 200 OK\r\n\r\n"
+            : "HTTP/1.1 404 Not Found\r\n\r\n";
+        send_all(fd, response, strlen(response));
+    }
+    free(buffer.data);
 }
 
 int main(void) {
