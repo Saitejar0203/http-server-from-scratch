@@ -100,7 +100,16 @@ def handle_client(conn, directory=None):
                 return
             method, path, headers, body, pending = parsed
             response = build_response(method, path, headers, body, directory)
+            close_requested = b"close" in [
+                token.strip().lower()
+                for token in headers.get(b"connection", b"").split(b",")
+            ]
+            if close_requested:
+                head, body = response.split(b"\r\n\r\n", 1)
+                response = head + b"\r\nConnection: close\r\n\r\n" + body
             conn.sendall(response)
+            if close_requested:
+                return
 
 
 def serve_connection(conn, directory):
