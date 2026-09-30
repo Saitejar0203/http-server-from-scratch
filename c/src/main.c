@@ -43,6 +43,18 @@ static int receive_more(int fd, Buffer *buffer) {
     return 0;
 }
 
+static int respond(int fd, int status, const char *type,
+                   const unsigned char *body, size_t length) {
+    char header[512];
+    const char *reason = status == 200 ? "OK" : "Not Found";
+    int n = snprintf(header, sizeof(header),
+        "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n\r\n",
+        status, reason, type, length);
+    if (n < 0 || (size_t)n >= sizeof(header)) return -1;
+    if (send_all(fd, header, (size_t)n) < 0) return -1;
+    return send_all(fd, body, length);
+}
+
 static void handle_client(int fd) {
     Buffer buffer = {0};
     while (!buffer.data || !strstr((char *)buffer.data, "\r\n\r\n")) {
@@ -54,10 +66,14 @@ static void handle_client(int fd) {
     char *method = strtok_r((char *)buffer.data, " ", &save);
     char *path = strtok_r(NULL, " ", &save);
     if (method && path) {
-        const char *response = strcmp(path, "/") == 0
-            ? "HTTP/1.1 200 OK\r\n\r\n"
-            : "HTTP/1.1 404 Not Found\r\n\r\n";
-        send_all(fd, response, strlen(response));
+        if (strcmp(path, "/") == 0) {
+            respond(fd, 200, "text/plain", NULL, 0);
+        } else if (strncmp(path, "/echo/", 6) == 0) {
+            const unsigned char *body = (unsigned char *)path + 6;
+            respond(fd, 200, "text/plain", body, strlen((char *)body));
+        } else {
+            respond(fd, 404, "text/plain", NULL, 0);
+        }
     }
     free(buffer.data);
 }
