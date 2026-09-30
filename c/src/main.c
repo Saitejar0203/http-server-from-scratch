@@ -279,6 +279,12 @@ int main(int argc, char **argv) {
         listen(listener, 128) < 0) {
         perror("listen/bind"); close(listener); return 1;
     }
+    /* Detached workers own their sockets and release resources when done. */
+    pthread_attr_t attributes;
+    if (pthread_attr_init(&attributes) != 0) { close(listener); return 1; }
+    if (pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED) != 0) {
+        pthread_attr_destroy(&attributes); close(listener); return 1;
+    }
     for (;;) {
         int client = accept(listener, NULL, NULL);
         if (client < 0) { if (errno == EINTR) continue; perror("accept"); break; }
@@ -286,11 +292,11 @@ int main(int argc, char **argv) {
         if (!owned_fd) { close(client); continue; }
         *owned_fd = client;
         pthread_t thread;
-        if (pthread_create(&thread, NULL, worker, owned_fd) != 0) {
+        if (pthread_create(&thread, &attributes, worker, owned_fd) != 0) {
             free(owned_fd); close(client); continue;
         }
-        pthread_detach(thread);
     }
+    pthread_attr_destroy(&attributes);
     close(listener);
     return 1;
 }
