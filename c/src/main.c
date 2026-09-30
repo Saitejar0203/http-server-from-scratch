@@ -88,10 +88,26 @@ static char *header_value(const char *headers, const char *name) {
     return strdup("");
 }
 
+static int has_token(const char *list, const char *wanted) {
+    size_t wanted_length = strlen(wanted);
+    while (*list) {
+        const char *end = strchr(list, ',');
+        if (!end) end = list + strlen(list);
+        const char *trimmed = end;
+        while (list < trimmed && (*list == ' ' || *list == '\t')) list++;
+        while (trimmed > list && (trimmed[-1] == ' ' || trimmed[-1] == '\t')) trimmed--;
+        if ((size_t)(trimmed - list) == wanted_length &&
+            strncasecmp(list, wanted, wanted_length) == 0) return 1;
+        if (!*end) break;
+        list = end + 1;
+    }
+    return 0;
+}
+
 static void return_echo(int fd, const char *headers, const unsigned char *body, size_t length) {
     char *accepted = header_value(headers, "Accept-Encoding");
     if (!accepted) return;
-    int gzip_accepted = strcasecmp(accepted, "gzip") == 0;
+    int gzip_accepted = has_token(accepted, "gzip");
     respond_encoded(fd, 200, "text/plain", body, length,
                     gzip_accepted ? "Content-Encoding: gzip\r\n" : "");
     free(accepted);
