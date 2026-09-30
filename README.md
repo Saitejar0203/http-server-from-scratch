@@ -1,11 +1,14 @@
 [![progress-banner](https://backend.codecrafters.io/progress/http-server/90e18e80-b78f-40de-873e-cc6f7ba667f6)](https://app.codecrafters.io/users/Saitejar0203?r=2qF)
 
-# HTTP Server in Python
+# HTTP Server from Scratch
 
-A from-scratch HTTP/1.1 server learning project in Python, following the
-[CodeCrafters challenge](https://app.codecrafters.io/courses/http-server/overview).
-The repository is currently at the starter stage; request handling has not yet
-been implemented. The first exercise is **Bind to a port**.
+I’m building an HTTP/1.1 server in Python from scratch to deepen my understanding
+of networking and low-level CS fundamentals and become better at building systems.
+I’m following the [CodeCrafters challenge](https://app.codecrafters.io/courses/http-server/overview)
+to explore sockets, TCP byte streams, file I/O, threads, compression, and connection lifetimes.
+
+The server supports echo and user-agent responses, file downloads and uploads,
+gzip compression, and concurrent persistent connections with explicit closure.
 
 ## Local setup
 
@@ -16,8 +19,8 @@ uv sync --locked
 ./your_program.sh
 ```
 
-The starter currently prints a debug message and exits. As we implement the
-stages, the same launcher will start the server.
+The launcher starts the server on `localhost:4221`. To serve files, pass
+`--directory /path/to/files`.
 
 ## How we work
 
